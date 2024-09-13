@@ -1,14 +1,18 @@
 import requests
 import pandas as pd
 import openpyxl
+import os
 
 # Leitor do arquivo excel (mudar o diretório dependendo do pc)
-df = pd.read_excel('Envio_de_Marcacao/marcacaoteste.xlsx')
+df = pd.read_excel(r'C:\Users\WI140\Desktop\TESTE JUST\Marcacaoteste.xlsx')
 df['data_hora'] = pd.to_datetime(df['data'].astype(str) + ' ' +
                                  df['hora'].astype(str),
                                  format='mixed')
 
 df['data_hora_iso'] = df['data_hora'].dt.strftime('%d/%m/%Y %H:%M')
+
+# Lista para armazenar os resultados
+resultados = []
 
 # Transformando a leitura das colunas em objetos
 for index, row in df.iterrows():
@@ -16,9 +20,8 @@ for index, row in df.iterrows():
     data = row['data_hora_iso']
 
     # Cabeça e corpo do arquivo Json
-
     headers = {
-        "identifier": "90.254.217/0001-10",
+        "identifier": "68.839.228/0001-03",
         "key": "67a4d6fa-ff21-487c-9426-7e22bb8a9142",
         'User-Agent': 'PostmanRuntime/7.30.0'
     }
@@ -28,9 +31,6 @@ for index, row in df.iterrows():
         "DataHoraApontamento": data,
         "ResponseType": "AS400V1"
     }
-    print(data)
-    print("Requisição enviada")
-    print(payload)
 
     # Requisição Post no endpoint
     response = requests.post(
@@ -38,11 +38,34 @@ for index, row in df.iterrows():
         json=payload,
         headers=headers)
 
-    # Impressão da Resposta
-    print('Resposta da API')
-    print(response.text)
+    # Analisando a resposta da API
+    try:
+        response_json = response.json()
+        if response_json.get("Sucesso"):
+            status = "Sucesso"
+            mensagem = response_json.get("Mensagem", "")
+        else:
+            status = "Falha"
+            mensagem = response_json.get("Mensagem", "Erro desconhecido")
+    except ValueError:
+        # Caso a resposta não seja um JSON válido
+        status = "Falha"
+        mensagem = "Resposta inválida da API"
 
-    if response.status_code == 200:
-        print(f'Requisição para {matricula} enviada com sucesso')
-    else:
-        print(f'Erro ao enviar a requisição para {matricula} {response.text}')
+    # Salvando os detalhes da resposta
+    resultados.append([matricula, data, status, mensagem])
+
+# Criando um DataFrame com os resultados
+df_resultados = pd.DataFrame(
+    resultados, columns=["Matricula", "DataHoraApontamento", "Status", "Mensagem"])
+
+
+# Salvando o resultado em um arquivo Excel
+output_path = r'C:\Users\WI140\Desktop\TESTE JUST\resultados_envio.xlsx'
+
+if os.path.exists(output_path):
+    os.remove(output_path)
+
+df_resultados.to_excel(output_path, index=False)
+
+print(f'Resultados salvos em: {output_path}')
