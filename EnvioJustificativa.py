@@ -1,8 +1,12 @@
+import os
 import pandas as pd
 import requests
 
 # Leitura do arquivo Excel
 df = pd.read_excel(r'C:\Users\WI140\Desktop\TESTE JUST\Panda\API.xlsx')
+
+#Lista de armazenamento dos resultados
+resultados = []
 
 for index, row in df.iterrows():
     idjust = row['Id-justificativa']
@@ -39,10 +43,34 @@ for index, row in df.iterrows():
         headers=headers
     )
 
-    print("Resposta da API:")
-    print(response.text)
+    # Analisando a resposta da API
+    try:
+        response_json = response.json()
+        if response_json.get("Sucesso"):
+            status = "Sucesso"
+            mensagem = response_json.get("Mensagem", "")
+        else:
+            status = "Falha"
+            mensagem = response_json.get("Mensagem", "Erro desconhecido")
+    except ValueError:
+        # Caso a resposta não seja um JSON válido
+        status = "Falha"
+        mensagem = "Resposta inválida da API"
+        
+    # Salvando os detalhes da resposta
+    resultados.append([idfunc, data, status, mensagem])
+    
+# Criando um DataFrame com os resultados
+df_resultados = pd.DataFrame(
+    resultados, columns=["Matricula", "DataHoraApontamento", "Status", "Mensagem"])
 
-    if response.status_code == 200:
-        print("Sucesso")
-    else:
-        print(f"Falha: {response.status_code}")
+
+# Salvando o resultado em um arquivo Excel
+output_path = r'C:\Users\luis.marques\Desktop\VsCode\resultado.xlsx'
+
+if os.path.exists(output_path):
+    os.remove(output_path)
+
+df_resultados.to_excel(output_path, index=False)
+
+print(f'Resultados salvos em: {output_path}')
