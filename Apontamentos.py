@@ -5,7 +5,7 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.styles import PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
-
+from datetime import datetime, timedelta
 
 def apply_borders(ws):
     # Define o estilo da borda
@@ -21,26 +21,35 @@ def apply_borders(ws):
         for cell in row:
             cell.border = thin_border
 
+# Função para gerar todas as datas no intervalo definido
+def generate_date_range(start_date, end_date):
+    return pd.date_range(start=start_date, end=end_date)
+
+# Função para remover o dia da semana da data no JSON
+def clean_json_date(date_str):
+    # Remove o dia da semana (últimos 3 caracteres)
+    return date_str[:10]
+
+
 # Função para fazer a requisição e salvar os dados filtrados no Excel
 def get_filtered_data_and_save_to_excel(url, payload, headers, output_path):
     response = requests.post(url, json=payload, headers=headers)
 
     if response.status_code == 200:
         try:
-            # Decodifica o JSON
             data = response.json()
-
-            # Verifica se o campo "Obj" existe e contém dados
             if "Obj" in data and isinstance(data['Obj'], list):
-                # Lista para armazenar os dados das entradas
                 all_entries = []
-                # Lista para armazenar dados fixos
                 all_fixed_data = []
+
+                # Defina o intervalo de datas do relatório
+                start_date = datetime.strptime(payload["DataInicio"], "%d/%m/%Y")
+                end_date = datetime.strptime(payload["DataFim"], "%d/%m/%Y")
+                full_date_range = generate_date_range(start_date, end_date)
 
                 # Itera sobre cada objeto no campo "Obj"
                 for item in data['Obj']:
-                
-                    # Adiciona os dados fixos (não relacionados às entradas) em uma lista
+                    # Adiciona os dados fixos para cada funcionário
                     fixed_data = {
                         'Empresa': item['InfoEmpresa']['Nome'],
                         'CNPJ': item['InfoEmpresa']['CNPJCPF'],
@@ -48,45 +57,58 @@ def get_filtered_data_and_save_to_excel(url, payload, headers, output_path):
                         'Funcionario': item['InfoFuncionario']['Nome'],
                         'Matricula': item['InfoFuncionario']['Matricula']
                     }
-                    # Adiciona os dados fixos à lista de dados
-                    all_fixed_data.append(fixed_data)
-                    
 
-                    # Itera sobre cada entrada dentro do campo 'Entradas'
+                    # Cria um dicionário para armazenar as marcações por data
+                    entradas_por_data = {}
                     for entrada in item['Entradas']:
-                        # Cria um dicionário para cada entrada com as informações necessárias
-                        entry_data = {
-                            'Data': entrada['Data'],
-                            'Horario': entrada['Horario'],
-                            'Apontamentos': entrada['Apontamentos'],
-                            'Horas Trabalhadas': entrada['HTrab'],
-                            'Horas Extras': entrada['HE'],
-                            'Descontos': entrada['Descontos'],
-                            'Debito': entrada['Debito'],
-                            'Credito': entrada['Credito']
-                        }
-                        # Adiciona o dicionário à lista de todas as entradas
-                        all_entries.append(entry_data)
-                        
-                
+                        # Limpa a data removendo o dia da semana
+                        data_limpa = clean_json_date(entrada['Data'])
+                        # Converte a data para o formato datetime
+                        entrada_data_formatada = datetime.strptime(data_limpa, "%d/%m/%Y")
+                        entradas_por_data[entrada_data_formatada] = entrada
 
-                # Converte as listas de entradas e dados fixos em DataFrames
-                df_entries = pd.DataFrame(all_entries)
-                df_fixed = pd.DataFrame(all_fixed_data)
+                    # Para cada data no intervalo, insere os dados ou deixa em branco
+                    for date in full_date_range:
+                        if date in entradas_por_data:
+                            entrada = entradas_por_data[date]
+                            entry_data = {
+                                'Data': date.strftime("%d/%m/%Y"),
+                                'Horario': entrada['Horario'],
+                                'Apontamentos': entrada['Apontamentos'],
+                                'Horas Trabalhadas': entrada['HTrab'],
+                                'Horas Extras': entrada['HE'],
+                                'Descontos': entrada['Descontos'],
+                                'Debito': entrada['Debito'],
+                                'Credito': entrada['Credito']
+                            }
+                        else:
+                            # Preenche com valores em branco para datas sem entrada
+                            entry_data = {
+                                'Data': date.strftime("%d/%m/%Y"),
+                                'Horario': '',
+                                'Apontamentos': '',
+                                'Horas Trabalhadas': '',
+                                'Horas Extras': '',
+                                'Descontos': '',
+                                'Debito': '',
+                                'Credito': ''
+                            }
 
-                # Combine os dois DataFrames
-                # Para garantir que o número de linhas em df_fixed seja igual ao de df_entries, replicamos os valores fixos
-                df_fixed_repeated = df_fixed.loc[df_fixed.index.repeat(len(df_entries)//len(df_fixed))].reset_index(drop=True)
+                        # Adiciona os dados fixos e de entrada combinados
+                        combined_data = {**fixed_data, **entry_data}
+                        all_entries.append(combined_data)
 
-                # Combina os DataFrames lado a lado
-                final_df = pd.concat([df_fixed_repeated, df_entries], axis=1)
-                
-                # Adiciona a nova coluna "Ajustes" com valores em branco ou padrão
-                final_df['Justificativas'] = ''  # ou você pode definir um valor padrão como: 'Ajuste Pendente'
+                # Converte a lista de dados em um DataFrame
+                final_df = pd.DataFrame(all_entries)
+
+                # Adiciona a nova coluna "Justificativas" com valores em branco
+                final_df['Justificativas'] = ''
                 final_df['Entrada'] = ''
                 final_df['Saida Pausa'] = ''
                 final_df['Volta Pausa'] = ''
                 final_df['Saida'] = ''
+
+
 
                 # Cria um Workbook do openpyxl
                 wb = Workbook()
@@ -154,7 +176,8 @@ def get_filtered_data_and_save_to_excel(url, payload, headers, output_path):
     else:
         print(f"Falha: {response.status_code}")
         print(response.text)
-datafim = '24/09/2024'
+        
+        
 
 # URL do endpoint e payload
 url = 'https://www.dimepkairos.com.br/RestServiceApi/ReportEmployeePunch/GetReportEmployeePunch'  # Modifique para o endpoint correto
@@ -162,20 +185,20 @@ payload = {"param": "value"}  # Modifique conforme necessário
 
 # Headers da requisição
 headers = {
-        "identifier": "29.024.277/0001-36",
+        "identifier": "31.487.442/0001-38",
         "key": "a06a8bc3-9b7f-4d97-b45d-15549eee8063",
         'User-Agent': 'PostmanRuntime/7.30.0'
 }
 
 payload = {
-        "MatriculaPessoa": [],
-        "DataInicio":"16/09/2024",
-        "DataFim":"24/09/2024",
-        "ResponseType":"AS400V1"
+        "MatriculaPessoa": [], # Manter em branco para coletar todos os colaboradores
+        "DataInicio":"", # Inserir data de inicio da coleta
+        "DataFim":"", # Inserir data final da coleta
+        "ResponseType":"AS400V1" # Campo Fixo não alterar
 }
 
-# Caminho de saída do arquivo Excel
-output_path = r'C:\Users\luis.marques\Desktop\VsCode\Tesdte.xlsx'
+# Local onde o arquivo gerado será salvo.
+output_path = r'C:\Users\luis.marques\Desktop\VsCode\Casa.xlsx'
 
 # Chama a função para obter e filtrar os dados e salvar no Excel
 get_filtered_data_and_save_to_excel(url, payload, headers, output_path)
